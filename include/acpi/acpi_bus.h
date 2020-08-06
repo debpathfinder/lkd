@@ -663,10 +663,17 @@ bool acpi_sleep_state_supported(u8 sleep_state);
 static inline bool acpi_sleep_state_supported(u8 sleep_state) { return false; }
 #endif
 
+#define ACPI_S2IDLE_SUSPEND_NOTIFY	0x1
+#define ACPI_S2IDLE_WAKE_NOTIFY		0x2
+
 #ifdef CONFIG_ACPI_SLEEP
 u32 acpi_target_system_state(void);
+int register_acpi_s2idle_notifier(struct notifier_block *nb);
+int unregister_acpi_s2idle_notifier(struct notifier_block *nb);
 #else
 static inline u32 acpi_target_system_state(void) { return ACPI_STATE_S0; }
+static inline int register_acpi_s2idle_notifier(struct notifier_block *nb) { return 0; }
+static inline int unregister_acpi_s2idle_notifier(struct notifier_block *nb) { return 0; }
 #endif
 
 static inline bool acpi_device_power_manageable(struct acpi_device *adev)
@@ -699,6 +706,8 @@ static inline void acpi_dev_put(struct acpi_device *adev)
 
 static inline int register_acpi_bus_type(void *bus) { return 0; }
 static inline int unregister_acpi_bus_type(void *bus) { return 0; }
+static inline int register_acpi_s2idle_notifier(struct notifier_block *nb) { return 0; }
+static inline int unregister_acpi_s2idle_notifier(struct notifier_block *nb) { return 0; }
 
 #endif				/* CONFIG_ACPI */
 

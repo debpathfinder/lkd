@@ -686,6 +686,26 @@ static const struct platform_suspend_ops acpi_suspend_ops_old = {
 	.recover = acpi_pm_finish,
 };
 
+static BLOCKING_NOTIFIER_HEAD(s2idle_notifier_chain_head);
+
+int register_acpi_s2idle_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&s2idle_notifier_chain_head,
+						nb);
+}
+
+int unregister_acpi_s2idle_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&s2idle_notifier_chain_head,
+						  nb);
+}
+
+static inline int acpi_s2idle_notifier_post(unsigned long event)
+{
+	return blocking_notifier_call_chain(&s2idle_notifier_chain_head,
+					    event, NULL);
+}
+
 static bool s2idle_wakeup;
 
 /*
@@ -977,6 +997,8 @@ static int acpi_s2idle_prepare_late(void)
 	acpi_sleep_run_lps0_dsm(ACPI_LPS0_SCREEN_OFF);
 	acpi_sleep_run_lps0_dsm(ACPI_LPS0_ENTRY);
 
+	acpi_s2idle_notifier_post(ACPI_S2IDLE_SUSPEND_NOTIFY);
+
 	return 0;
 }
 
@@ -1053,6 +1075,8 @@ static void acpi_s2idle_restore_early(void)
 
 	acpi_sleep_run_lps0_dsm(ACPI_LPS0_EXIT);
 	acpi_sleep_run_lps0_dsm(ACPI_LPS0_SCREEN_ON);
+
+	acpi_s2idle_notifier_post(ACPI_S2IDLE_WAKE_NOTIFY);
 }
 
 static void acpi_s2idle_restore(void)
