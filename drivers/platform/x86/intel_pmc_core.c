@@ -1231,6 +1231,13 @@ static void pmc_core_s2idle_suspend(void)
 {
 	struct pmc_dev *pmcdev = &pmc;
 
+	if (s2idle_delay_ms) {
+		dev_info(pmcdev->dev, "start %dms s2idle delay\n",
+			s2idle_delay_ms);
+		mdelay(s2idle_delay_ms);
+		dev_info(pmcdev->dev, "end delay\n");
+	}
+
 	pmcdev->check_counters = false;
 
 	/* No warnings on S0ix failures */
