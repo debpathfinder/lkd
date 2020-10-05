@@ -591,18 +591,20 @@ static inline u64 pmc_core_adjust_slp_s0_step(u32 value)
 	return (u64)value * SPT_PMC_SLP_S0_RES_COUNTER_STEP;
 }
 
-static int pmc_core_dev_state_get(void *data, u64 *val)
+static void pmc_core_get_slps0_counter(struct pmc_dev *pmcdev, u64 *val)
 {
-	struct pmc_dev *pmcdev = data;
 	const struct pmc_reg_map *map = pmcdev->map;
 	u32 value;
 
 	value = pmc_core_reg_read(pmcdev, map->slp_s0_offset);
 	*val = pmc_core_adjust_slp_s0_step(value);
-
-	return 0;
 }
 
+static int pmc_core_dev_state_get(void *data, u64 *val)
+{
+	pmc_core_get_slps0_counter((struct pmc_dev *)data, val);
+	return 0;
+}
 DEFINE_DEBUGFS_ATTRIBUTE(pmc_core_dev_state, pmc_core_dev_state_get, NULL, "%llu\n");
 
 static int pmc_core_check_read_lock_bit(void)
@@ -1274,8 +1276,7 @@ static __maybe_unused int pmc_core_suspend(struct device *dev)
 		return -EIO;
 
 	/* Save S0ix residency for checking later */
-	if (pmc_core_dev_state_get(pmcdev, &pmcdev->s0ix_counter))
-		return -EIO;
+	pmc_core_get_slps0_counter(pmcdev, &pmcdev->s0ix_counter);
 
 	pmcdev->check_counters = true;
 	return 0;
@@ -1298,8 +1299,7 @@ static inline bool pmc_core_is_s0ix_failed(struct pmc_dev *pmcdev)
 {
 	u64 s0ix_counter;
 
-	if (pmc_core_dev_state_get(pmcdev, &s0ix_counter))
-		return false;
+	pmc_core_get_slps0_counter(pmcdev, &s0ix_counter);
 
 	if (s0ix_counter == pmcdev->s0ix_counter)
 		return true;
