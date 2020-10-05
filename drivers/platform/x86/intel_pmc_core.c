@@ -704,9 +704,16 @@ static inline u8 pmc_core_reg_read_byte(struct pmc_dev *pmcdev, int offset)
 static void pmc_core_display_map(struct seq_file *s, int index, int idx, int ip,
 				 u8 pf_reg, const struct pmc_bit_map **pf_map)
 {
-	seq_printf(s, "PCH IP: %-2d - %-32s\tState: %s\n",
-		   ip, pf_map[idx][index].name,
-		   pf_map[idx][index].bit_mask & pf_reg ? "Off" : "On");
+	struct pmc_dev *pmcdev = &pmc;
+
+	if (s)
+		seq_printf(s, "PCH IP: %-2d - %-32s\tState: %s\n",
+			   ip, pf_map[idx][index].name,
+			   pf_map[idx][index].bit_mask & pf_reg ? "Off" : "On");
+	else
+		dev_info(pmcdev->dev, "PCH IP: %-2d - %-32s\tState: %s\n",
+			   ip, pf_map[idx][index].name,
+			   pf_map[idx][index].bit_mask & pf_reg ? "Off" : "On");
 }
 
 static int pmc_core_ppfear_show(struct seq_file *s, void *unused)
@@ -1198,6 +1205,10 @@ static int s2idle_delay_ms;
 module_param(s2idle_delay_ms, int, 0644);
 MODULE_PARM_DESC(s2idle_delay_ms, "Suspend-to-idle post plaform phase delay");
 
+static bool save_compare_s0ix_pmc_state;
+module_param(save_compare_s0ix_pmc_state, bool, 0644);
+MODULE_PARM_DESC(save_compare_s0ix_pmc_state, "Save pmc state on s0ix pass and compare to state when s0ix fails");
+
 struct notifier_block pmc_s2idle_nb;
 
 static inline bool pmc_core_is_pc10_failed(struct pmc_dev *pmcdev)
@@ -1227,6 +1238,52 @@ static inline bool pmc_core_is_s0ix_failed(struct pmc_dev *pmcdev)
 	return false;
 }
 
+static void pmc_core_save_state(struct pmc_dev *pmcdev)
+{
+	int index, offset;
+
+	offset = pmcdev->map->ppfear0_offset;
+
+	for (index = 0; index < pmcdev->map->ppfear_buckets &&
+	     index < PPFEAR_MAX_NUM_ENTRIES; index++, offset++)
+		pmcdev->pf_regs_suspend[index] =
+			pmc_core_reg_read_byte(pmcdev, offset);
+
+}
+
+static void pmc_core_compare_state(struct pmc_dev *pmcdev, bool s0ix_failed)
+{
+	const struct pmc_bit_map **maps = pmcdev->map->pfear_sts;
+	int index, idx, ip = 0;
+
+	if (!s0ix_failed) {
+		memcpy(pmcdev->pf_regs_s0ix, pmcdev->pf_regs_suspend,
+		       PPFEAR_MAX_NUM_ENTRIES);
+		pmcdev->s0ix_saved = true;
+		return;
+	}
+
+	if (pmcdev->s0ix_saved)
+		dev_info(pmcdev->dev,
+			 "S0ix failed. Showing PMC registers that differ from passing case:\n");
+	else
+		return;
+
+	for (idx = 0; maps[idx]; idx++)
+		for (index = 0; maps[idx][index].name &&
+		     index < pmcdev->map->ppfear_buckets * 8; ip++, index++) {
+			u8 s0ix_state = pmcdev->pf_regs_s0ix[index / 8];
+			u8 suspend_state = pmcdev->pf_regs_suspend[index / 8];
+			u8 test = s0ix_state ^ suspend_state;
+
+			/* Show only IPs that changed */
+			if (BIT(ip) & test)
+				pmc_core_display_map(NULL, index, idx, ip,
+						     suspend_state, maps);
+		}
+
+}
+
 static void pmc_core_s2idle_suspend(void)
 {
 	struct pmc_dev *pmcdev = &pmc;
@@ -1241,7 +1298,7 @@ static void pmc_core_s2idle_suspend(void)
 	pmcdev->check_counters = false;
 
 	/* No warnings on S0ix failures */
-	if (!warn_on_s0ix_failures)
+	if (!warn_on_s0ix_failures && !save_compare_s0ix_pmc_state)
 		return;
 
 	/* Save PC10 residency for checking later */
@@ -1253,6 +1310,9 @@ static void pmc_core_s2idle_suspend(void)
 	/* Save S0ix residency for checking later */
 	pmc_core_get_slps0_counter(pmcdev, &pmcdev->s0ix_counter);
 
+	if (save_compare_s0ix_pmc_state)
+		pmc_core_save_state(pmcdev);
+
 	pmcdev->check_counters = true;
 }
 
@@ -1260,13 +1320,11 @@ static void pmc_core_s2idle_resume(void)
 {
 	struct pmc_dev *pmcdev = &pmc;
 	struct device *dev = pmcdev->dev;
+	bool s0ix_failed;
 	const struct pmc_bit_map **maps = pmcdev->map->lpm_sts;
 	int offset = pmcdev->map->lpm_status_offset;
 
 	if (!pmcdev->check_counters)
-		return;
-
-	if (!pmc_core_is_s0ix_failed(pmcdev))
 		return;
 
 	if (pmc_core_is_pc10_failed(pmcdev)) {
@@ -1276,13 +1334,23 @@ static void pmc_core_s2idle_resume(void)
 		return;
 	}
 
-	/* The real interesting case - S0ix failed - lets ask PMC why. */
-	dev_warn(dev, "CPU did not enter SLP_S0!!! (S0ix cnt=%llu)\n",
-		 pmcdev->s0ix_counter);
-	if (pmcdev->map->slps0_dbg_maps)
-		pmc_core_slps0_display(pmcdev, dev, NULL);
-	if (pmcdev->map->lpm_sts)
-		pmc_core_lpm_display(pmcdev, dev, NULL, offset, "STATUS", maps);
+	s0ix_failed = pmc_core_is_s0ix_failed(pmcdev);
+	if (s0ix_failed)
+		/* The real interesting case - S0ix failed - lets ask PMC why. */
+		dev_warn(dev, "CPU did not enter SLP_S0!!! (S0ix cnt=%llu)\n",
+			 pmcdev->s0ix_counter);
+	else if (!save_compare_s0ix_pmc_state)
+		return;
+
+	if (warn_on_s0ix_failures) {
+		if (pmcdev->map->slps0_dbg_maps)
+			pmc_core_slps0_display(pmcdev, dev, NULL);
+		if (pmcdev->map->lpm_sts)
+			pmc_core_lpm_display(pmcdev, dev, NULL, offset, "STATUS", maps);
+	}
+
+	if (save_compare_s0ix_pmc_state)
+		pmc_core_compare_state(pmcdev, s0ix_failed);
 }
 
 static int pmc_core_s2idle_notifier(struct notifier_block *nb,
