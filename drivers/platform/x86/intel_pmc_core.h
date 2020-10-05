@@ -264,6 +264,7 @@ struct pmc_reg_map {
 
 /**
  * struct pmc_dev - pmc device structure
+ * @dev:		struct device from platform
  * @base_addr:		contains pmc base address
  * @regbase:		pointer to io-remapped memory location
  * @map:		pointer to pmc_reg_map struct that contains platform
@@ -279,6 +280,7 @@ struct pmc_reg_map {
  * pmc_dev contains info about power management controller device.
  */
 struct pmc_dev {
+	struct device *dev;
 	u32 base_addr;
 	void __iomem *regbase;
 	const struct pmc_reg_map *map;

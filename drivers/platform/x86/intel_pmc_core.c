@@ -1202,6 +1202,7 @@ static int pmc_core_probe(struct platform_device *pdev)
 	if (!cpu_id)
 		return -ENODEV;
 
+	pmcdev->dev = &pdev->dev;
 	pmcdev->map = (struct pmc_reg_map *)cpu_id->driver_data;
 
 	/*
