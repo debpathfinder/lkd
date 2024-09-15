@@ -264,6 +264,7 @@ struct pmc_reg_map {
 
 /**
  * struct pmc_dev - pmc device structure
+ * @dev:		struct device from platform
  * @base_addr:		contains pmc base address
  * @regbase:		pointer to io-remapped memory location
  * @map:		pointer to pmc_reg_map struct that contains platform
@@ -275,10 +276,14 @@ struct pmc_reg_map {
  * @check_counters:	On resume, check if counters are getting incremented
  * @pc10_counter:	PC10 residency counter
  * @s0ix_counter:	S0ix residency (step adjusted)
+ * @s0ix_saved:		true if pf_regs_s0ix contains valid s0ix pmc state
+ * @pf_regs_suspend:	pfear state at platform suspend
+ * @pf_regs_s0ix:	Saved pfear state when platform last achieved s0ix
  *
  * pmc_dev contains info about power management controller device.
  */
 struct pmc_dev {
+	struct device *dev;
 	u32 base_addr;
 	void __iomem *regbase;
 	const struct pmc_reg_map *map;
@@ -289,6 +294,10 @@ struct pmc_dev {
 	bool check_counters; /* Check for counter increments on resume */
 	u64 pc10_counter;
 	u64 s0ix_counter;
+
+	bool s0ix_saved;
+	u8 pf_regs_suspend[PPFEAR_MAX_NUM_ENTRIES];
+	u8 pf_regs_s0ix[PPFEAR_MAX_NUM_ENTRIES];
 };
 
 #endif /* PMC_CORE_H */
